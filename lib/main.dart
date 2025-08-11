@@ -183,7 +183,7 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
                 const Icon(Icons.hearing, size: 96, color: Colors.white70),
                 const SizedBox(height: 16),
                 const Text(
-                  '소리 감지 대기 중...',
+                  '소리 감지 중...',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 28,
@@ -284,36 +284,75 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
                           padding: const EdgeInsets.all(12),
                           itemCount: _events.length,
                           separatorBuilder: (_, __) =>
-                              const Divider(color: Colors.white12, height: 12),
+                              const SizedBox(height: 10),
                           itemBuilder: (_, i) {
                             final e = _events[i];
-                            return Row(
-                              children: [
-                                Icon(
-                                  iconFor(e.label),
-                                  color: Colors.white70,
-                                  size: 20,
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    '${e.label}  (${e.direction}°)',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 15,
+                            final isLatestRow = i == 0; // 맨 위(최신) 줄만 강조
+
+                            return Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isLatestRow
+                                    ? Colors.amber.withOpacity(0.22) // 강조 배경
+                                    : Colors.white.withOpacity(0.06), // 기존 배경톤
+                                borderRadius: BorderRadius.circular(12),
+                                border: isLatestRow
+                                    ? Border.all(
+                                        color: Colors.amberAccent,
+                                        width: 1,
+                                      ) // 강조 테두리
+                                    : null,
+                                boxShadow: isLatestRow
+                                    ? [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.25),
+                                          blurRadius: 8,
+                                          offset: const Offset(0, 4),
+                                        ),
+                                      ]
+                                    : null,
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    iconFor(e.label),
+                                    color: isLatestRow
+                                        ? Colors.white
+                                        : Colors.white70,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      '${e.label}  (${e.direction}°)',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 15,
+                                        fontWeight: isLatestRow
+                                            ? FontWeight.w700
+                                            : FontWeight.w500,
+                                      ),
                                     ),
                                   ),
-                                ),
-                                Text(
-                                  e.confidence.toStringAsFixed(3),
-                                  style: const TextStyle(
-                                    color: Colors.white70,
-                                    fontFamily: 'monospace',
+                                  Text(
+                                    e.confidence.toStringAsFixed(3),
+                                    style: TextStyle(
+                                      color: isLatestRow
+                                          ? Colors.white
+                                          : Colors.white70,
+                                      fontFamily: 'monospace',
+                                      fontWeight: isLatestRow
+                                          ? FontWeight.w700
+                                          : FontWeight.w500,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             );
                           },
                         ),
