@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as dev;
 import 'package:flutter/material.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -32,35 +34,83 @@ class MainListenerScreen extends StatefulWidget {
 
 class _MainListenerScreenState extends State<MainListenerScreen> {
   late WebSocketChannel channel;
+  late StreamSubscription sub;
   String lastMessage = "서버 연결 대기 중...";
 
   @override
   void initState() {
     super.initState();
 
-    // ✅ 실제 FastAPI 서버 연결
-    channel = WebSocketChannel.connect(Uri.parse('ws://3.24.208.26:8000/ws'));
-    channel.stream.listen((message) {
-      setState(() => lastMessage = message);
-      final data = jsonDecode(message);
-      _handleMessage(data);
+    dev.log('WS connecting...'); // ← 로그
+    print('WS connecting...'); // ← 브라우저 콘솔용
+
+    channel = WebSocketChannel.connect(
+      Uri.parse('ws://3.24.208.26:8000/ws/esp32?esp_id=mobile-01'),
+    );
+
+    sub = channel.stream.listen(
+      (message) {
+        dev.log('WS message: $message'); // ← 수신 로그
+        print('WS message: $message');
+
+        setState(() => lastMessage = message);
+        try {
+          final data = jsonDecode(message) as Map<String, dynamic>;
+          _handlePush(data);
+        } catch (e, st) {
+          dev.log('WS non-JSON message', error: e, stackTrace: st);
+          print('WS non-JSON message: $e');
+        }
+      },
+      onError: (e, st) {
+        dev.log('WS error', error: e, stackTrace: st); // ← 에러 로그
+        print('WS error: $e');
+        setState(() => lastMessage = '연결 오류: $e');
+      },
+      onDone: () {
+        dev.log(
+          'WS closed. code=${channel.closeCode} reason=${channel.closeReason}',
+        ); // ← 종료 로그
+        print('WS closed');
+        if (mounted) {
+          setState(() => lastMessage = '서버가 연결을 종료했습니다.');
+        }
+      },
+      cancelOnError: true,
+    );
+
+    // 5초 동안 아무 이벤트 없을 때 힌트
+    Future.delayed(const Duration(seconds: 5), () {
+      if (!mounted) return;
+      if (lastMessage == '서버 연결 대기 중...') {
+        dev.log('WS no event within 5s (timeout hint)');
+        print('WS no event within 5s (timeout hint)');
+        setState(() => lastMessage = '연결 대기 중(5초 경과) — 서버/포트/보안그룹 확인');
+      }
     });
   }
 
-  void _handleMessage(Map<String, dynamic> data) {
-    final type = data["type"];
+  // 👇 initState 바깥(같은 클래스 안)
+  void _handlePush(Map<String, dynamic> data) {
+    if (data['event'] != 'info') return;
 
-    if (type == "voice") {
+    final label = (data['label'] ?? '').toString();
+    final direction = (data['direction'] ?? -1).toString();
+
+    if (!mounted) return;
+
+    final l = label.toLowerCase();
+    if (l.contains('speech')) {
       Navigator.push(
         context,
         PageRouteBuilder(
-          pageBuilder: (_, __, ___) => VoiceScreen(text: data["content"]),
+          pageBuilder: (_, __, ___) => const VoiceScreen(text: '음성 감지'),
           transitionsBuilder: (_, anim, __, child) =>
               FadeTransition(opacity: anim, child: child),
         ),
       );
-    } else if (type == "car") {
-      _showCarDialog(context, data["content"], data["direction"]);
+    } else if (l.contains('car') || l.contains('horn') || l.contains('siren')) {
+      _showCarDialog(context, label, direction);
     }
   }
 
@@ -124,6 +174,7 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
 
   @override
   void dispose() {
+    sub.cancel();
     channel.sink.close(); // 연결 종료
     super.dispose();
   }
@@ -161,7 +212,7 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
                   vertical: 10,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.1),
+                  color: Colors.white.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
