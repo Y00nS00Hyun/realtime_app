@@ -23,7 +23,6 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// ✅ 메인 화면: 서버에서 소리 종류 수신 → 자동 화면 전환
 class MainListenerScreen extends StatefulWidget {
   const MainListenerScreen({super.key});
 
@@ -39,40 +38,19 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
   void initState() {
     super.initState();
 
-    // 🔹 실제 서버 연결 (필요 시 활성화)
-    // channel = WebSocketChannel.connect(Uri.parse('wss://example.com/sound'));
-    // channel.stream.listen((message) {
-    //   setState(() => lastMessage = message);
-    //   final data = jsonDecode(message);
-    //   _handleMessage(data);
-    // });
-
-    // ✅ 테스트용: 3초 후 음성 메시지
-    Future.delayed(const Duration(seconds: 3), () {
-      final fakeVoiceMessage = {
-        "type": "voice",
-        "content": "안녕하세요! 테스트 음성입니다.",
-      };
-      _handleMessage(fakeVoiceMessage);
-    });
-
-    // ✅ 테스트용: 6초 후 차량 경적 메시지
-    Future.delayed(const Duration(seconds: 6), () {
-      final fakeCarMessage = {
-        "type": "car",
-        "content": "경적 소리",
-        "direction": "왼쪽",
-      };
-      _handleMessage(fakeCarMessage);
+    // ✅ 실제 FastAPI 서버 연결
+    channel = WebSocketChannel.connect(Uri.parse('ws://3.24.208.26:8000/ws'));
+    channel.stream.listen((message) {
+      setState(() => lastMessage = message);
+      final data = jsonDecode(message);
+      _handleMessage(data);
     });
   }
 
-  // ✅ 메시지 처리 후 화면 전환 or 팝업 띄우기
   void _handleMessage(Map<String, dynamic> data) {
     final type = data["type"];
 
     if (type == "voice") {
-      // 음성 메시지는 새 화면으로 전환
       Navigator.push(
         context,
         PageRouteBuilder(
@@ -82,12 +60,10 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
         ),
       );
     } else if (type == "car") {
-      // 차량 소리는 팝업으로 띄움
       _showCarDialog(context, data["content"], data["direction"]);
     }
   }
 
-  // ✅ 차량 소리 팝업 다이얼로그 (문구 간결)
   void _showCarDialog(BuildContext context, String sound, String direction) {
     showDialog(
       context: context,
@@ -113,7 +89,7 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
                 const Icon(Icons.directions_car, size: 60, color: Colors.white),
                 const SizedBox(height: 15),
                 Text(
-                  sound, // ex: 경적 소리 / 사이렌 소리
+                  sound,
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
@@ -148,7 +124,7 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
 
   @override
   void dispose() {
-    // channel.sink.close(); // 실제 서버 연결 시 닫기
+    channel.sink.close(); // 연결 종료
     super.dispose();
   }
 
@@ -158,7 +134,7 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF1E3C72), Color(0xFF2A5298)], // 예쁜 블루 그라데이션
+            colors: [Color(0xFF1E3C72), Color(0xFF2A5298)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -205,7 +181,6 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
   }
 }
 
-// ✅ 음성 화면 (그라데이션 배경 + 큰 텍스트만)
 class VoiceScreen extends StatelessWidget {
   final String text;
   const VoiceScreen({super.key, required this.text});
@@ -216,7 +191,7 @@ class VoiceScreen extends StatelessWidget {
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF2193b0), Color(0xFF6dd5ed)], // 시원한 블루톤 그라데이션
+            colors: [Color(0xFF2193b0), Color(0xFF6dd5ed)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
