@@ -59,6 +59,10 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
   final List<SoundEvent> _events = [];
   SoundEvent? _latest;
 
+  Timer? _silenceTimer;
+  static const Duration _silenceTimeout = Duration(seconds: 3);
+  String? _lastEventKey;
+
   @override
   void initState() {
     super.initState();
@@ -100,7 +104,6 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
       (message) {
         // 원본 로그
         print('WS RAW: $message');
-        setState(() => statusText = '수신 중');
 
         try {
           final data = jsonDecode(message) as Map<String, dynamic>;
@@ -109,15 +112,27 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
           dev.log('WS non-JSON', error: e, stackTrace: st);
         }
       },
+
       onError: (e, st) {
         dev.log('WS error', error: e, stackTrace: st);
-        if (mounted) setState(() => statusText = '연결 오류: $e');
+        if (!mounted) return;
+        _silenceTimer?.cancel();
+        setState(() {
+          _latest = null;
+          statusText = '연결 오류: $e';
+        });
       },
+
       onDone: () {
         dev.log(
           'WS closed. code=${channel.closeCode} reason=${channel.closeReason}',
         );
-        if (mounted) setState(() => statusText = '연결 종료됨');
+        if (!mounted) return;
+        _silenceTimer?.cancel();
+        setState(() {
+          _latest = null;
+          statusText = '연결 종료됨';
+        });
       },
       cancelOnError: true,
     );
@@ -131,9 +146,35 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
     });
   }
 
-  // ===== 실시간 갱신: 상태만 갱신(네비/팝업 없음) =====
+  @override
+  void dispose() {
+    sub?.cancel();
+    channel.sink.close();
+    _silenceTimer?.cancel(); // 무신호 타이머 해제
+    super.dispose();
+  }
+
+  void _armSilenceTimer() {
+    _silenceTimer?.cancel();
+    _silenceTimer = Timer(_silenceTimeout, () {
+      if (!mounted) return;
+      setState(() {
+        _latest = null;
+        // _events.clear(); // 무신호 시 로그도 비우고 싶다면 주석 해제
+        statusText = '최근 수신 없음';
+      });
+    });
+  }
+
   void _handlePush(Map<String, dynamic> data) {
     if (data['event'] != 'info') return;
+
+    final labelStr = (data['label'] ?? '').toString();
+
+    // 🚫 silence일 경우 아예 무시
+    if (labelStr.toLowerCase().contains('silence')) {
+      return; // 화면/로그에 아무것도 안 남김
+    }
 
     final ev = SoundEvent(
       label: (data['label'] ?? '').toString(),
@@ -151,21 +192,28 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
           : int.tryParse((data['ms'] ?? '0').toString()) ?? 0,
     );
 
-    if (ev.confidence < 0.12) return; // 낮은 신뢰도 필터(필요시 조정/삭제)
+    if (ev.confidence < 0.12) {
+      // 낮은 신뢰도일 때도 "무신호" 취급하려면 타이머만 재설정하지 말고 return
+      return;
+    }
+
+    final key =
+        '${ev.label}|${ev.direction}|${ev.confidence.toStringAsFixed(3)}|${ev.energy.toStringAsFixed(1)}|${ev.ms}';
+    final isDuplicate = key == _lastEventKey;
 
     if (!mounted) return;
     setState(() {
       _latest = ev;
-      _events.insert(0, ev);
-      if (_events.length > 100) _events.removeLast();
+      if (!isDuplicate) {
+        _events.insert(0, ev);
+        if (_events.length > 100) _events.removeLast();
+      }
+      _lastEventKey = key;
+      statusText = '수신 중';
     });
-  }
 
-  @override
-  void dispose() {
-    sub?.cancel();
-    channel.sink.close();
-    super.dispose();
+    // ▼ 새 데이터 수신했으므로 무신호 타이머 재설정
+    _armSilenceTimer();
   }
 
   // ===== UI =====
@@ -217,7 +265,7 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                _latest!.label,
+                                korLabel(_latest!.label),
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
@@ -295,13 +343,23 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
                                 vertical: 10,
                               ),
                               decoration: BoxDecoration(
-                                color: isLatestRow
-                                    ? Colors.amber.withOpacity(0.22) // 강조 배경
-                                    : Colors.white.withOpacity(0.06), // 기존 배경톤
+                                color: (isLatestRow
+                                    ? const Color.fromARGB(
+                                        255,
+                                        113,
+                                        148,
+                                        255,
+                                      ).withOpacity(0.4) // 강조 배경
+                                    : Colors.white.withOpacity(0.06)), // 기존 배경톤
                                 borderRadius: BorderRadius.circular(12),
                                 border: isLatestRow
                                     ? Border.all(
-                                        color: Colors.amberAccent,
+                                        color: Color.fromARGB(
+                                          255,
+                                          144,
+                                          172,
+                                          255,
+                                        ),
                                         width: 1,
                                       ) // 강조 테두리
                                     : null,
@@ -327,7 +385,7 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
                                   const SizedBox(width: 10),
                                   Expanded(
                                     child: Text(
-                                      '${e.label}  (${e.direction}°)',
+                                      '${korLabel(e.label)}  (${e.direction}°)',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
