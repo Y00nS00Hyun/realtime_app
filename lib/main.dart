@@ -63,6 +63,11 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
   static const Duration _silenceTimeout = Duration(seconds: 3);
   String? _lastEventKey;
 
+  int _retryCount = 0;
+  final List<int> _backoffs = [1, 2, 5, 10, 20];
+  Timer? _reconnectTimer;
+  bool _isConnecting = false;
+
   @override
   void initState() {
     super.initState();
@@ -94,7 +99,40 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
     return Icons.hearing;
   }
 
+  void _scheduleReconnect() {
+    if (!mounted) return;
+    if (_isConnecting) return; // 이미 연결 시도 중이면 중복 방지
+
+    final delaySec = _backoffs[_retryCount.clamp(0, _backoffs.length - 1)];
+    setState(() {
+      statusText = '재연결 대기 중... (${delaySec}s)';
+    });
+
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(Duration(seconds: delaySec), () {
+      if (!mounted) return;
+      _retryCount = (_retryCount + 1).clamp(0, _backoffs.length - 1);
+      _connectWebSocket(); // 재연결 시도
+    });
+  }
+
   void _connectWebSocket() {
+    if (_isConnecting) return;
+    _isConnecting = true;
+
+    // 이전 연결 정리
+    try {
+      sub?.cancel();
+    } catch (_) {}
+    try {
+      channel.sink.close();
+    } catch (_) {}
+    sub = null;
+
+    setState(() {
+      statusText = '서버에 연결 시도 중...';
+    });
+
     dev.log('WS connecting...');
     channel = WebSocketChannel.connect(
       Uri.parse('ws://3.24.208.26:8000/ws/esp32?esp_id=mobile-01'),
@@ -102,55 +140,50 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
 
     sub = channel.stream.listen(
       (message) {
-        // 원본 로그
-        print('WS RAW: $message');
+        // 연결 성공 시 재연결 타이머 해제
+        _reconnectTimer?.cancel();
+        _retryCount = 0;
+        _isConnecting = false;
 
         try {
           final data = jsonDecode(message) as Map<String, dynamic>;
-          _handlePush(data); // 메시지 핸들
+          _handlePush(data);
         } catch (e, st) {
           dev.log('WS non-JSON', error: e, stackTrace: st);
         }
       },
-
       onError: (e, st) {
         dev.log('WS error', error: e, stackTrace: st);
-        if (!mounted) return;
+        _isConnecting = false;
         _silenceTimer?.cancel();
         setState(() {
           _latest = null;
           statusText = '연결 오류: $e';
         });
+        _scheduleReconnect(); // 자동 재연결
       },
-
       onDone: () {
         dev.log(
           'WS closed. code=${channel.closeCode} reason=${channel.closeReason}',
         );
-        if (!mounted) return;
+        _isConnecting = false;
         _silenceTimer?.cancel();
         setState(() {
           _latest = null;
           statusText = '연결 종료됨';
         });
+        _scheduleReconnect(); // 자동 재연결
       },
       cancelOnError: true,
     );
-
-    // 연결 힌트
-    Future.delayed(const Duration(seconds: 5), () {
-      if (!mounted) return;
-      if (statusText == '서버 연결 대기 중...') {
-        setState(() => statusText = '연결 대기 중 — 서버/포트 확인 필요');
-      }
-    });
   }
 
   @override
   void dispose() {
     sub?.cancel();
     channel.sink.close();
-    _silenceTimer?.cancel(); // 무신호 타이머 해제
+    _silenceTimer?.cancel();
+    _reconnectTimer?.cancel();
     super.dispose();
   }
 
@@ -160,8 +193,8 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
       if (!mounted) return;
       setState(() {
         _latest = null;
-        // _events.clear(); // 무신호 시 로그도 비우고 싶다면 주석 해제
         statusText = '최근 수신 없음';
+        // _events.clear(); // 필요 시 사용
       });
     });
   }
@@ -177,7 +210,7 @@ class _MainListenerScreenState extends State<MainListenerScreen> {
     }
 
     final ev = SoundEvent(
-      label: (data['label'] ?? '').toString(),
+      label: labelStr,
       direction: (data['direction'] ?? -1) is num
           ? (data['direction'] as num).toInt()
           : int.tryParse((data['direction'] ?? '-1').toString()) ?? -1,
